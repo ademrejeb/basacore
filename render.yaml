@@ -36,11 +36,11 @@ services:
       - key: MIGRATION_DATABASE_URL
         sync: false
       - key: API_BASE_URL
-        sync: false
+        value: https://basacore-api.onrender.com
       - key: WEB_BASE_URL
-        sync: false
+        value: https://basacore-console.onrender.com
       - key: JWT_ISSUER
-        sync: false
+        value: https://basacore-api.onrender.com
       - key: JWT_PRIVATE_KEY
         sync: false
       - key: JWT_PUBLIC_KEY
@@ -50,15 +50,15 @@ services:
       - key: SMTP_HOST
         sync: false
       - key: CORS_ORIGINS
-        sync: false
+        value: https://basacore-console.onrender.com,https://fieldopsfieldops.onrender.com,https://factory-web-scfz.onrender.com
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://basacore-console.onrender.com,https://fieldopsfieldops.onrender.com,https://factory-web-scfz.onrender.com
       - key: SEED_ADMIN_EMAIL
         value: admin@basa.dev
       - key: SEED_ADMIN_PASSWORD
         sync: false
       # Used by `python -m app.seed --accounts` (schema + OIDC client).
       - key: SUITE_PUBLIC_ORIGINS
-        sync: false
+        value: https://fieldopsfieldops.onrender.com,https://factory-web-scfz.onrender.com
       - key: SUITE_OIDC_SECRET
         sync: false
