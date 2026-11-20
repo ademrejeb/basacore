@@ -1,0 +1,13 @@
+{
+  "name": "basacore-demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "External Atlas CRM demo that authenticates users through the Basacore auth gateway.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

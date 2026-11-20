@@ -1,0 +1,176 @@
+name: basacore
+
+# One-command local stack: `docker compose up --build`.
+# Every value below can be overridden from the shell or a local `.env` file.
+# Production deployments must supply real secrets and enable COOKIE_SECURE.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-basa}
+      POSTGRES_USER: ${POSTGRES_OWNER:-platform_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-change-me-owner}
+      POSTGRES_APP_USER: ${POSTGRES_APP:-platform_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-change-me-app}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_OWNER:-platform_owner} -d ${POSTGRES_DB:-basa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3002}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3002,http://localhost:3003}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3002,http://localhost:3003}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP:-platform_app}:${POSTGRES_APP_PASSWORD:-change-me-app}@db:5432/${POSTGRES_DB:-basa}
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://${POSTGRES_OWNER:-platform_owner}:${POSTGRES_OWNER_PASSWORD:-change-me-owner}@db:5432/${POSTGRES_DB:-basa}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      REDIS_URL: redis://redis:6379/0
+      KEYS_DIR: /app/keys
+      JWT_ISSUER: ${JWT_ISSUER:-http://localhost:8000}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-basacore}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-15}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
+      MFA_CHALLENGE_TTL_MINUTES: ${MFA_CHALLENGE_TTL_MINUTES:-5}
+      APP_ACCESS_TOKEN_TTL_MINUTES: ${APP_ACCESS_TOKEN_TTL_MINUTES:-15}
+      APP_REFRESH_TOKEN_TTL_DAYS: ${APP_REFRESH_TOKEN_TTL_DAYS:-30}
+      ID_TOKEN_TTL_MINUTES: ${ID_TOKEN_TTL_MINUTES:-15}
+      AUTH_CODE_TTL_SECONDS: ${AUTH_CODE_TTL_SECONDS:-60}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      MAX_REQUEST_BYTES: ${MAX_REQUEST_BYTES:-2097152}
+      # Empty means X-Forwarded-For is ignored and the socket peer is recorded.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      EXPOSE_API_DOCS: ${EXPOSE_API_DOCS:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@basa.dev}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Adm1n!Basa#2026}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      SEED_REFERENCE: ${SEED_REFERENCE:-true}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+    volumes:
+      - keys-data:/app/keys
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://localhost:8000/readyz')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    environment:
+      INTERNAL_API_BASE_URL: http://api:8000
+      # Public origin used to send the browser back to the authorization endpoint.
+      PUBLIC_API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3002}
+      # Only enable when a trusted proxy sets the forwarded headers in front of
+      # this container; otherwise the proxy strips browser-supplied values.
+      TRUST_FORWARDED_HEADERS: ${TRUST_FORWARDED_HEADERS:-0}
+      # The console shows the seeded demo login only when this is enabled.
+      SHOW_DEMO_CREDENTIALS: ${SHOW_DEMO_CREDENTIALS:-0}
+      NODE_ENV: production
+    ports:
+      - "3002:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "-",
+          "http://127.0.0.1:3000/login",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  demo-app:
+    build:
+      context: ./demo-app
+    restart: unless-stopped
+    environment:
+      PORT: 3003
+      BASACORE_API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      # Server-side calls stay on the Compose network; browser redirects use the public URL.
+      BASACORE_INTERNAL_API_BASE_URL: http://api:8000
+      PUBLIC_BASE_URL: ${DEMO_APP_BASE_URL:-http://localhost:3003}
+      BASACORE_CLIENT_ID: ${DEMO_CLIENT_ID:-basa_demo_atlas_web}
+      BASACORE_CLIENT_SECRET: ${DEMO_CLIENT_SECRET:-bsc_demo_atlas_web_secret_2026}
+      BASACORE_TENANT: ${DEMO_TENANT:-northwind-sales}
+      DEMO_EMAIL: ${DEMO_EMAIL:-emma.wilson@northwind.dev}
+      DEMO_PASSWORD: ${SEED_ADMIN_PASSWORD:-Adm1n!Basa#2026}
+      NODE_ENV: production
+    ports:
+      - "3003:3003"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3003/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  db-data:
+  redis-data:
+  keys-data:
