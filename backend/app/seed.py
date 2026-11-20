@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import os
 import random
 import uuid
 from datetime import datetime, timedelta
@@ -1296,6 +1297,155 @@ async def seed_demo(db: AsyncSession) -> None:
     print(f"  OIDC client_secret: {demo_client_secret}")
 
 
+async def seed_accounts(db: AsyncSession) -> None:
+    """Accounts and configuration only: no projects, invoices, runs or tickets.
+
+    Creates the platform administrator, one demo organization, one application
+    with a production environment, one tenant owned by the tenant demo user, and
+    the OIDC login client the suite applications share.
+    """
+    password = settings.seed_admin_password
+    admin = await ensure_user(
+        db,
+        email=settings.seed_admin_email,
+        full_name="Avery Basa",
+        user_type=UserType.INTERNAL,
+        password=password,
+        job_title="Chief Platform Officer",
+        department="Platform",
+    )
+    await assign(db, user=admin, role_key="super_admin", scope_type=ScopeType.PLATFORM, scope_id=None)
+
+    org = await one(db, Organization, Organization.slug == "northwind-labs")
+    if org is None:
+        org = Organization(
+            name="Northwind Labs",
+            slug="northwind-labs",
+            description="Demo organization for the Techverse Cloud Suite.",
+            status="active",
+            billing_email="billing@northwind.dev",
+        )
+        db.add(org)
+        await db.flush()
+
+    app = await one(db, Application, Application.slug == "techverse-suite")
+    if app is None:
+        app = Application(
+            organization_id=org.id,
+            name="Techverse Suite",
+            slug="techverse-suite",
+            description="Demo application for the Techverse Cloud Suite.",
+            status=ApplicationStatus.ACTIVE.value,
+            owner_id=admin.id,
+            base_url=os.environ.get("SUITE_LAUNCHER_URL", "http://localhost:4000"),
+        )
+        db.add(app)
+        await db.flush()
+
+    env = await one(
+        db,
+        ApplicationEnvironment,
+        ApplicationEnvironment.application_id == app.id,
+        ApplicationEnvironment.slug == "production",
+    )
+    if env is None:
+        db.add(
+            ApplicationEnvironment(
+                application_id=app.id,
+                name="Production",
+                slug="production",
+                kind=EnvironmentKind.PRODUCTION.value,
+                status=EnvironmentStatus.ACTIVE.value,
+                is_default=True,
+            )
+        )
+        await db.flush()
+
+    owner = await ensure_user(
+        db,
+        email="emma.wilson@northwind.dev",
+        full_name="Emma Wilson",
+        user_type=UserType.EXTERNAL,
+        password=password,
+        job_title="Operations Lead",
+    )
+    tenant = await one(db, Tenant, Tenant.application_id == app.id, Tenant.slug == "northwind")
+    if tenant is None:
+        tenant = Tenant(
+            application_id=app.id,
+            organization_id=org.id,
+            name="Northwind",
+            slug="northwind",
+            status=TenantStatus.ACTIVE.value,
+            owner_id=owner.id,
+            isolation_strategy="shared_database",
+            quotas={},
+            configuration={"locale": "en-US", "onboarding_complete": True},
+            branding={"primary_color": "#4f46e5", "logo_url": None},
+        )
+        db.add(tenant)
+        await db.flush()
+
+    membership = await one(
+        db,
+        TenantMembership,
+        TenantMembership.tenant_id == tenant.id,
+        TenantMembership.user_id == owner.id,
+    )
+    if membership is None:
+        db.add(
+            TenantMembership(
+                tenant_id=tenant.id,
+                user_id=owner.id,
+                status=MembershipStatus.ACTIVE.value,
+                is_billing_contact=True,
+                created_at=utcnow(),
+            )
+        )
+        await db.flush()
+    await assign(
+        db,
+        user=owner,
+        role_key="tenant_owner",
+        scope_type=ScopeType.TENANT,
+        scope_id=tenant.id,
+        granted_by=admin.id,
+    )
+
+    client_id = "suite_web"
+    client_secret = os.environ.get("SUITE_OIDC_SECRET", "bsc_suite_demo_secret_2026")
+    if not await one(db, ApplicationClient, ApplicationClient.client_id == client_id):
+        origins = [
+            origin.strip().rstrip("/")
+            for origin in os.environ.get(
+                "SUITE_PUBLIC_ORIGINS",
+                "http://localhost:3000,http://localhost:3010,http://localhost:3100",
+            ).split(",")
+            if origin.strip()
+        ]
+        db.add(
+            ApplicationClient(
+                application_id=app.id,
+                name="Techverse Suite web",
+                client_id=client_id,
+                client_secret_hash=hash_token(client_secret),
+                client_type="confidential",
+                redirect_uris=[f"{origin}/api/auth/callback/basacore" for origin in origins],
+                post_logout_redirect_uris=[f"{origin}/login" for origin in origins],
+                allowed_origins=origins,
+                scopes=["openid", "profile", "email", "offline_access"],
+                pkce_required=True,
+                status="active",
+                created_by=admin.id,
+            )
+        )
+
+    await db.commit()
+    print(f"  Admin:   {settings.seed_admin_email}")
+    print(f"  Tenant:  emma.wilson@northwind.dev (northwind)")
+    print(f"  OIDC:    client_id={client_id} secret={client_secret}")
+
+
 async def main(reference_only: bool) -> None:
     async with SessionLocal() as db:
         await sync_reference(db)
@@ -1313,5 +1463,19 @@ if __name__ == "__main__":
         action="store_true",
         help="Only sync permissions, system roles and the default policy",
     )
+    parser.add_argument(
+        "--accounts",
+        action="store_true",
+        help="Sync reference data, then create demo accounts and configuration only",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.reference))
+    if args.accounts:
+        async def run_accounts() -> None:
+            async with SessionLocal() as db:
+                await sync_reference(db)
+                async with platform_scope(db):
+                    await seed_accounts(db)
+
+        asyncio.run(run_accounts())
+    else:
+        asyncio.run(main(args.reference))
