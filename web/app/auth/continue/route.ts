@@ -13,6 +13,9 @@ export const dynamic = "force-dynamic";
  */
 const API_PUBLIC_BASE =
   process.env.PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? "http://localhost:8000";
+// Behind Render's proxy the request origin can be the internal bind address
+// (0.0.0.0:10000), so the public console origin comes from configuration.
+const WEB_BASE = (process.env.WEB_BASE_URL ?? "").replace(/\/+$/, "");
 
 function parseTarget(returnTo: string): URL | null {
   if (!returnTo.startsWith("/v1/oauth/authorize")) return null;
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
   // Replay the authorization request on the console origin: it is rewritten to
   // the API proxy, which forwards the session cookies, so the API sees the
   // signed-in user instead of bouncing back to /login.
-  return NextResponse.redirect(new URL(target.pathname + target.search, request.nextUrl.origin), {
+  return NextResponse.redirect(new URL(target.pathname + target.search, WEB_BASE), {
     status: 303,
   });
 }
