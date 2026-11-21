@@ -33,8 +33,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (session && !reauth) redirect(continueHref);
 
   const showDemo = process.env.SHOW_DEMO_CREDENTIALS === "1";
+  const demoEmail = process.env.DEMO_EMAIL?.trim() || "admin@basa.dev";
+  const demoPassword = process.env.DEMO_PASSWORD?.trim() || "Adm1n!Basa#2026";
   const initialEmail =
-    emailParam ?? session?.user.email ?? (returnTo ? "" : showDemo ? "admin@basa.dev" : "");
+    emailParam ?? session?.user.email ?? (returnTo ? "" : showDemo ? demoEmail : "");
 
   return (
     <div className="login-shell">
@@ -103,11 +105,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <LoginForm initialEmail={initialEmail} returnTo={returnTo ?? null} />
           {showDemo ? (
             <div className="login-demo">
-              <strong>Local demo account</strong>
+              <strong>Demo account</strong>
               <br />
-              <code>admin@basa.dev</code> / <code>Adm1n!Basa#2026</code>
+              <code>{demoEmail}</code> / <code>{demoPassword}</code>
               <br />
-              Workspace users share the same password in the demo data.
+              Demo users share the same password.
             </div>
           ) : null}
         </div>
