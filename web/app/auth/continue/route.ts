@@ -47,5 +47,10 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   }
-  return NextResponse.redirect(target, { status: 303 });
+  // Replay the authorization request on the console origin: it is rewritten to
+  // the API proxy, which forwards the session cookies, so the API sees the
+  // signed-in user instead of bouncing back to /login.
+  return NextResponse.redirect(new URL(target.pathname + target.search, request.nextUrl.origin), {
+    status: 303,
+  });
 }

@@ -29,6 +29,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // Browser-facing OAuth endpoints live on the console host, the only origin
+  // that holds the session cookie. See app/api/oidc/discovery/route.ts.
+  async rewrites() {
+    return [
+      { source: "/.well-known/openid-configuration", destination: "/api/oidc/discovery" },
+      { source: "/.well-known/oauth-authorization-server", destination: "/api/oidc/discovery" },
+      { source: "/v1/:path*", destination: "/api/proxy/v1/:path*" },
+    ];
+  },
 };
 
 export default nextConfig;
