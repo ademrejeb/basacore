@@ -2,8 +2,6 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-# @adem.rejeb/ui is vendored as a file dependency; it must exist before npm ci.
-COPY vendor ./vendor
 RUN npm ci
 
 FROM node:22-alpine AS builder
